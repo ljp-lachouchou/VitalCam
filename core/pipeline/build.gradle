@@ -1,0 +1,23 @@
+plugins {
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt.android)
+}
+
+apply from: "$rootDir/android-common.gradle"
+
+android {
+    namespace 'com.ljp.vitalcam.core.pipeline'
+}
+
+dependencies {
+    implementation project(':core:common')
+
+    implementation libs.hilt.android
+    ksp libs.hilt.compiler
+
+    implementation libs.kotlinx.coroutines.core
+
+    testImplementation libs.junit
+}

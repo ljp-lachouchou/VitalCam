@@ -1,0 +1,57 @@
+plugins {
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt.android)
+}
+
+apply from: "$rootDir/android-common.gradle"
+
+android {
+    namespace 'com.ljp.vitalcam.feature.camera'
+
+    buildFeatures {
+        compose true
+    }
+}
+
+dependencies {
+    implementation project(':core:common')
+    implementation project(':core:pipeline')
+    implementation project(':core:overlay')
+
+    // Compose
+    def composeBom = platform(libs.compose.bom)
+    implementation composeBom
+    implementation libs.compose.ui
+    implementation libs.compose.ui.graphics
+    implementation libs.compose.material3
+    implementation libs.compose.foundation
+    implementation libs.compose.runtime
+    implementation libs.compose.ui.tooling.preview
+    debugImplementation libs.compose.ui.tooling
+
+    // Lifecycle + ViewModel
+    implementation libs.androidx.lifecycle.runtime.ktx
+    implementation libs.androidx.lifecycle.runtime.compose
+    implementation libs.androidx.lifecycle.viewmodel.compose
+
+    // CameraX
+    implementation libs.camerax.core
+    implementation libs.camerax.camera2
+    implementation libs.camerax.lifecycle
+    implementation libs.camerax.view
+    implementation libs.camerax.compose
+
+    // Hilt
+    implementation libs.hilt.android
+    ksp libs.hilt.compiler
+    implementation libs.hilt.navigation.compose
+
+    // Coroutines
+    implementation libs.kotlinx.coroutines.core
+    implementation libs.kotlinx.coroutines.android
+
+    testImplementation libs.junit
+}

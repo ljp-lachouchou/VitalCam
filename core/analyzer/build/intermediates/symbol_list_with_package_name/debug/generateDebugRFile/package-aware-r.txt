@@ -1,0 +1,1 @@
+com.ljp.vitalcam.core.analyzer
