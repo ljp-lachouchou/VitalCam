@@ -34,6 +34,7 @@ data class AnalysisContext(
         return AnalysisResult(
             overallScore = overallScore,
             guidances = sortedGuidances,
+            subjects = subjects,
             metadata = metadata
         )
     }

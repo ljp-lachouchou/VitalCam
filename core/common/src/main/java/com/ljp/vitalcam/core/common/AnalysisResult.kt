@@ -6,6 +6,8 @@ data class AnalysisResult(
     val overallScore: Int,
     /** 引导建议列表（按优先级排序） */
     val guidances: List<Guidance>,
+    /** 检测到的主体列表 */
+    val subjects: List<DetectedSubject>,
     /** 扩展元数据 */
     val metadata: Map<String, Any>
 ) {
@@ -14,6 +16,7 @@ data class AnalysisResult(
         val EMPTY = AnalysisResult(
             overallScore = 0,
             guidances = emptyList(),
+            subjects = emptyList(),
             metadata = emptyMap()
         )
     }

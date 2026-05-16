@@ -1,6 +1,7 @@
 package com.ljp.vitalcam.core.analyzer.di
 
 import com.ljp.vitalcam.core.analyzer.RuleOfThirdsAnalyzer
+import com.ljp.vitalcam.core.analyzer.SubjectDetectorStep
 import com.ljp.vitalcam.core.pipeline.AnalysisStep
 import dagger.Binds
 import dagger.Module
@@ -16,4 +17,8 @@ abstract class AnalyzerModule {
     @Binds
     @IntoSet
     abstract fun bindRuleOfThirdsAnalyzer(impl: RuleOfThirdsAnalyzer): AnalysisStep
+
+    @Binds
+    @IntoSet
+    abstract fun bindSubjectDetectorStep(impl: SubjectDetectorStep): AnalysisStep
 }
