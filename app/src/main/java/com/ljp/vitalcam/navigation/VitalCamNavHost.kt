@@ -10,23 +10,51 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navigation
 import com.ljp.vitalcam.feature.camera.CameraScreen
+import com.ljp.vitalcam.feature.camera.CameraViewModel
+import com.ljp.vitalcam.feature.camera.PhotoEditScreen
+import com.ljp.vitalcam.feature.camera.PhotoReportScreen
 import com.ljp.vitalcam.feature.gallery.GalleryScreen
 import com.ljp.vitalcam.feature.gallery.GalleryViewModel
 import com.ljp.vitalcam.feature.gallery.PhotoDetailScreen
 
-/** 应用导航图：相机 + 相册 */
+/** 应用导航图：相机(+报告) + 相册 */
 @Composable
 fun VitalCamNavHost(
     navController: NavHostController = rememberNavController()
 ) {
-    NavHost(navController = navController, startDestination = "camera") {
-        composable("camera") {
-            CameraScreen(
-                onNavigateToGallery = { navController.navigate("gallery_graph") }
-            )
+    NavHost(navController = navController, startDestination = "camera_graph") {
+
+        // 相机嵌套导航图：camera 和 report 共享 CameraViewModel
+        navigation(startDestination = "camera", route = "camera_graph") {
+            composable("camera") { entry ->
+                val graphEntry = remember(entry) { navController.getBackStackEntry("camera_graph") }
+                val cameraViewModel: CameraViewModel = hiltViewModel(graphEntry)
+                CameraScreen(
+                    onNavigateToGallery = { navController.navigate("gallery_graph") },
+                    onNavigateToReport = { navController.navigate("editor") },
+                    viewModel = cameraViewModel
+                )
+            }
+            composable("editor") { entry ->
+                val graphEntry = remember(entry) { navController.getBackStackEntry("camera_graph") }
+                val cameraViewModel: CameraViewModel = hiltViewModel(graphEntry)
+                PhotoEditScreen(
+                    viewModel = cameraViewModel,
+                    onBack = { navController.popBackStack() },
+                    onViewReport = { navController.navigate("report") }
+                )
+            }
+            composable("report") { entry ->
+                val graphEntry = remember(entry) { navController.getBackStackEntry("camera_graph") }
+                val cameraViewModel: CameraViewModel = hiltViewModel(graphEntry)
+                PhotoReportScreen(
+                    viewModel = cameraViewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
         }
 
-        // 嵌套导航图：gallery_graph 内的路由共享同一个 GalleryViewModel
+        // 相册嵌套导航图
         navigation(startDestination = "gallery", route = "gallery_graph") {
             composable("gallery") { entry ->
                 val graphEntry = remember(entry) { navController.getBackStackEntry("gallery_graph") }

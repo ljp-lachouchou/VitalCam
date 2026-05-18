@@ -21,6 +21,7 @@ dependencies {
     implementation project(':core:common')
     implementation project(':core:pipeline')
     implementation project(':core:overlay')
+    implementation project(':core:filter')
 
     // Compose
     def composeBom = platform(libs.compose.bom)

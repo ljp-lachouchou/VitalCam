@@ -18,6 +18,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,7 +29,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 
-/** 图片网格页面 */
+/** 图片网格页面，带权限检查 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(
@@ -37,7 +38,30 @@ fun GalleryScreen(
     modifier: Modifier = Modifier,
     viewModel: GalleryViewModel = hiltViewModel()
 ) {
+    GalleryPermission {
+        GalleryContent(
+            onBack = onBack,
+            onPhotoClick = onPhotoClick,
+            viewModel = viewModel,
+            modifier = modifier
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GalleryContent(
+    onBack: () -> Unit,
+    onPhotoClick: (String) -> Unit,
+    viewModel: GalleryViewModel,
+    modifier: Modifier = Modifier
+) {
     val photos by viewModel.photos.collectAsStateWithLifecycle()
+
+    // 权限授予后刷新照片列表
+    LaunchedEffect(Unit) {
+        viewModel.loadPhotos()
+    }
 
     Scaffold(
         topBar = {

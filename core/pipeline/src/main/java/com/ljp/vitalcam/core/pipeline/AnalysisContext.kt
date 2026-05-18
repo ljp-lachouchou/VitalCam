@@ -39,6 +39,7 @@ data class AnalysisContext(
 
         return AnalysisResult(
             overallScore = overallScore,
+            dimensionScores = compositionScores,
             guidances = sortedGuidances,
             subjects = subjects,
             metadata = metadata

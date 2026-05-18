@@ -2,7 +2,9 @@ package com.ljp.vitalcam.core.analyzer.di
 
 import com.ljp.vitalcam.core.analyzer.ColorAnalyzer
 import com.ljp.vitalcam.core.analyzer.CompositionAnalyzer
+import com.ljp.vitalcam.core.analyzer.DeviceOrientationAnalyzer
 import com.ljp.vitalcam.core.analyzer.GuidanceCoordinator
+import com.ljp.vitalcam.core.analyzer.LandscapeAnalyzer
 import com.ljp.vitalcam.core.analyzer.LightAnalyzer
 import com.ljp.vitalcam.core.analyzer.PoseGuidanceAnalyzer
 import com.ljp.vitalcam.core.analyzer.PoseLandmarkStep
@@ -19,6 +21,10 @@ import dagger.multibindings.IntoSet
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class AnalyzerModule {
+
+    @Binds
+    @IntoSet
+    abstract fun bindDeviceOrientationAnalyzer(impl: DeviceOrientationAnalyzer): AnalysisStep
 
     @Binds
     @IntoSet
@@ -47,6 +53,10 @@ abstract class AnalyzerModule {
     @Binds
     @IntoSet
     abstract fun bindColorAnalyzer(impl: ColorAnalyzer): AnalysisStep
+
+    @Binds
+    @IntoSet
+    abstract fun bindLandscapeAnalyzer(impl: LandscapeAnalyzer): AnalysisStep
 
     @Binds
     @IntoSet

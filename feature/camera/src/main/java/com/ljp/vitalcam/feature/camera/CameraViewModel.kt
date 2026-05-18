@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
@@ -39,7 +40,8 @@ import kotlin.math.abs
 /** 相机 ViewModel，管理 CameraX 生命周期、分析管道调用和拍照功能 */
 @HiltViewModel
 class CameraViewModel @Inject constructor(
-    private val analysisPipeline: AnalysisPipeline
+    private val analysisPipeline: AnalysisPipeline,
+    private val orientationProvider: DeviceOrientationProvider
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<CameraUiState>(CameraUiState.Idle)
@@ -53,6 +55,23 @@ class CameraViewModel @Inject constructor(
 
     private val _cameraMode = MutableStateFlow(CameraMode.AUTO)
     val cameraMode: StateFlow<CameraMode> = _cameraMode.asStateFlow()
+
+    /** 拍照时的分析结果快照，报告页读取 */
+    private val _captureResult = MutableStateFlow<AnalysisResult?>(null)
+    val captureResult: StateFlow<AnalysisResult?> = _captureResult.asStateFlow()
+
+    /** 拍照保存后的照片 URI */
+    private val _capturedPhotoUri = MutableStateFlow<Uri?>(null)
+    val capturedPhotoUri: StateFlow<Uri?> = _capturedPhotoUri.asStateFlow()
+
+    /** 拍照时的 roll 角度，供滤镜矫正用 */
+    private val _captureRollDegrees = MutableStateFlow(0f)
+    val captureRollDegrees: StateFlow<Float> = _captureRollDegrees.asStateFlow()
+
+    /** 消费 CaptureSuccess 状态，重置为 PreviewActive */
+    fun onCaptureResultConsumed() {
+        _uiState.value = CameraUiState.PreviewActive
+    }
 
     /** 切换拍照模式，同时重置 zoom */
     fun setCameraMode(mode: CameraMode) {
@@ -113,6 +132,7 @@ class CameraViewModel @Inject constructor(
                     analysis
                 )
 
+                orientationProvider.start()
                 _uiState.value = CameraUiState.PreviewActive
             } catch (e: Exception) {
                 _uiState.value = CameraUiState.Error(e.message ?: "相机初始化失败")
@@ -146,7 +166,9 @@ class CameraViewModel @Inject constructor(
                 width = bitmap.width,
                 height = bitmap.height,
                 rotationDegrees = 0,
-                timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
+                timestampMs = imageProxy.imageInfo.timestamp / 1_000_000,
+                rollDegrees = orientationProvider.rollDegrees,
+                pitchDegrees = orientationProvider.pitchDegrees
             )
         } catch (_: Exception) {
             // toBitmap() 失败时必须重置标志，否则后续帧全部被丢弃
@@ -219,32 +241,25 @@ class CameraViewModel @Inject constructor(
         consecutiveZoomOutCount = 0
     }
 
-    /** 拍照并保存到相册 */
+    /** 拍照并保存到私有缓存目录，用户在编辑页点击"保存"后才写入相册 */
     fun capturePhoto(context: Context) {
         val capture = imageCapture ?: return
 
+        _captureResult.value = _analysisResult.value
+        _captureRollDegrees.value = orientationProvider.rollDegrees
         _uiState.value = CameraUiState.Capturing
 
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "VitalCam_${System.currentTimeMillis()}")
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/VitalCam")
-            }
-        }
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(
-            context.contentResolver,
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        ).build()
+        // 保存到 app 私有缓存，不直接入相册
+        val tempFile = java.io.File(context.cacheDir, "vitalcam_temp_${System.currentTimeMillis()}.jpg")
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(tempFile).build()
 
         capture.takePicture(
             outputOptions,
             ContextCompat.getMainExecutor(context),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                    _uiState.value = CameraUiState.PreviewActive
+                    _capturedPhotoUri.value = android.net.Uri.fromFile(tempFile)
+                    _uiState.value = CameraUiState.CaptureSuccess
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -252,6 +267,17 @@ class CameraViewModel @Inject constructor(
                 }
             }
         )
+    }
+
+    /** 编辑页返回时清理临时文件 */
+    fun cleanupTempPhoto() {
+        val uri = _capturedPhotoUri.value ?: return
+        val path = uri.path ?: return
+        val file = java.io.File(path)
+        if (file.exists() && file.name.startsWith("vitalcam_temp_")) {
+            file.delete()
+        }
+        _capturedPhotoUri.value = null
     }
 
     /** 按指定角度旋转 bitmap，0 度时直接返回原图 */
@@ -263,6 +289,7 @@ class CameraViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        orientationProvider.stop()
         analysisExecutor.shutdown()
     }
 }

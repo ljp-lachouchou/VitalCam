@@ -22,10 +22,12 @@ class GuidanceCoordinator @Inject constructor() : AnalysisStep {
 
         // 维度层级：从最基础到最精细
         private val HIERARCHY = listOf(
+            "orientation",
             "lighting",
             "color",
             "composition",
             "subject_framing",
+            "landscape_framing",
             "pose_guidance"
         )
     }
