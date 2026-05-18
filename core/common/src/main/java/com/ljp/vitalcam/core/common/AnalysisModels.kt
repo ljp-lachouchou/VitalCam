@@ -43,7 +43,9 @@ data class Guidance(
     /** 调整方向 */
     val direction: AdjustDirection,
     /** 优先级，值越小优先级越高 */
-    val priority: Int
+    val priority: Int,
+    /** 产出此引导的分析器 ID，用于阶段化过滤 */
+    val sourceId: String = ""
 )
 
 /** 调整方向枚举 */

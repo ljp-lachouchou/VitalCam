@@ -18,6 +18,7 @@
             <option value="$PROJECT_DIR$/core/pipeline" />
             <option value="$PROJECT_DIR$/feature" />
             <option value="$PROJECT_DIR$/feature/camera" />
+            <option value="$PROJECT_DIR$/feature/gallery" />
           </set>
         </option>
         <option name="resolveExternalAnnotations" value="false" />

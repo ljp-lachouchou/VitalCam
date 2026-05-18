@@ -2,21 +2,35 @@ package com.ljp.vitalcam.feature.camera
 
 import com.ljp.vitalcam.feature.camera.BuildConfig
 import androidx.camera.compose.CameraXViewfinder
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -31,18 +45,36 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ljp.vitalcam.core.common.AnalysisResult
+import com.ljp.vitalcam.core.common.CameraMode
 import com.ljp.vitalcam.core.common.DetectedSubject
 import com.ljp.vitalcam.core.overlay.RuleOfThirdsOverlay
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import android.content.ContentUris
+import android.os.Build
+import android.provider.MediaStore
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
 
 /** 相机主界面：预览 + 网格叠加 + 引导提示 + 快门按钮 */
 @Composable
 fun CameraScreen(
     modifier: Modifier = Modifier,
+    onNavigateToGallery: () -> Unit = {},
     viewModel: CameraViewModel = hiltViewModel()
 ) {
     CameraPermission {
         CameraContent(
             viewModel = viewModel,
+            onNavigateToGallery = onNavigateToGallery,
             modifier = modifier
         )
     }
@@ -52,6 +84,7 @@ fun CameraScreen(
 @Composable
 private fun CameraContent(
     viewModel: CameraViewModel,
+    onNavigateToGallery: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -59,6 +92,7 @@ private fun CameraContent(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val surfaceRequest by viewModel.surfaceRequest.collectAsStateWithLifecycle()
     val analysisResult by viewModel.analysisResult.collectAsStateWithLifecycle()
+    val cameraMode by viewModel.cameraMode.collectAsStateWithLifecycle()
 
     // 绑定 CameraX 到生命周期
     LaunchedEffect(lifecycleOwner) {
@@ -99,7 +133,7 @@ private fun CameraContent(
                 .padding(top = 48.dp)
         )
 
-        // 底部快门按钮
+        // 底部：模式选择器 + 评分 + 快门按钮 + 相册入口
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -108,6 +142,12 @@ private fun CameraContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // 拍照模式选择器
+            CameraModeSelector(
+                currentMode = cameraMode,
+                onModeSelected = viewModel::setCameraMode
+            )
+
             // 构图评分
             if (analysisResult.overallScore > 0) {
                 Text(
@@ -117,38 +157,100 @@ private fun CameraContent(
                 )
             }
 
-            CaptureButton(
-                onClick = { viewModel.capturePhoto(context) },
-                enabled = uiState is CameraUiState.PreviewActive
-            )
+            // 快门按钮 + 相册缩略图
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                // 左侧相册缩略图入口
+                GalleryThumbnailButton(
+                    onClick = onNavigateToGallery,
+                    modifier = Modifier.size(48.dp)
+                )
+
+                Spacer(modifier = Modifier.width(24.dp))
+
+                CaptureButton(
+                    onClick = { viewModel.capturePhoto(context) },
+                    enabled = uiState is CameraUiState.PreviewActive
+                )
+
+                // 右侧占位，保持快门居中
+                Spacer(modifier = Modifier.width(72.dp))
+            }
         }
     }
 }
 
-/** 顶部引导提示浮层 */
+/** 顶部引导提示浮层，toast 式：新建议弹出显示 3 秒后淡出，新建议刷掉旧建议 */
 @Composable
 private fun GuidanceOverlay(
     analysisResult: AnalysisResult,
     modifier: Modifier = Modifier
 ) {
-    val topGuidance = analysisResult.guidances.firstOrNull() ?: return
+    val currentMessage = analysisResult.guidances.firstOrNull()?.message
+    var displayedMessage by remember { mutableStateOf<String?>(null) }
+    var visible by remember { mutableStateOf(false) }
 
-    Box(
+    // 仅在建议内容变化时触发：显示 → 停留 3 秒 → 淡出
+    LaunchedEffect(currentMessage) {
+        if (currentMessage != null) {
+            displayedMessage = currentMessage
+            visible = true
+            delay(3000)
+            visible = false
+        } else {
+            visible = false
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
         modifier = modifier,
-        contentAlignment = Alignment.Center
+        enter = fadeIn(tween(250)) + slideInVertically(tween(250)) { -it },
+        exit = fadeOut(tween(400)) + slideOutVertically(tween(400)) { -it }
     ) {
-        Text(
-            text = topGuidance.message,
-            style = MaterialTheme.typography.bodyLarge,
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .background(
-                    color = Color.Black.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(8.dp)
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = displayedMessage ?: "",
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .background(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+    }
+}
+
+/** 拍照模式水平选择器 */
+@Composable
+private fun CameraModeSelector(
+    currentMode: CameraMode,
+    onModeSelected: (CameraMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    ) {
+        items(CameraMode.entries.toList()) { mode ->
+            FilterChip(
+                selected = mode == currentMode,
+                onClick = { onModeSelected(mode) },
+                label = { Text(mode.label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Color.White.copy(alpha = 0.3f),
+                    selectedLabelColor = Color.White,
+                    labelColor = Color.White.copy(alpha = 0.7f)
                 )
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        )
+            )
+        }
     }
 }
 
@@ -214,4 +316,69 @@ private fun SubjectBoundsOverlay(
             }
         }
     }
+}
+
+/** 相册缩略图入口按钮：显示最近一张照片或占位图标 */
+@Composable
+private fun GalleryThumbnailButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    // 查询最近一张 VitalCam 照片的 URI
+    val latestPhotoUri = remember {
+        queryLatestVitalCamPhoto(context)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .border(2.dp, Color.White, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (latestPhotoUri != null) {
+            AsyncImage(
+                model = latestPhotoUri,
+                contentDescription = "打开相册",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                painter = painterResource(id = android.R.drawable.ic_menu_gallery),
+                contentDescription = "打开相册",
+                tint = Color.White
+            )
+        }
+    }
+}
+
+/** 查询 Pictures/VitalCam/ 下最新一张照片的 URI */
+private fun queryLatestVitalCamPhoto(context: android.content.Context): android.net.Uri? {
+    val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+    val projection = arrayOf(MediaStore.Images.Media._ID)
+
+    val selection: String
+    val selectionArgs: Array<String>
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?"
+        selectionArgs = arrayOf("Pictures/VitalCam%")
+    } else {
+        @Suppress("DEPRECATION")
+        selection = "${MediaStore.Images.Media.DATA} LIKE ?"
+        selectionArgs = arrayOf("%/Pictures/VitalCam/%")
+    }
+
+    val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+    context.contentResolver.query(
+        collection, projection, selection, selectionArgs, sortOrder
+    )?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
+            return ContentUris.withAppendedId(collection, id)
+        }
+    }
+    return null
 }

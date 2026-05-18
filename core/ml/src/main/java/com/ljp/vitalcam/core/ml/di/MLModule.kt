@@ -2,6 +2,8 @@ package com.ljp.vitalcam.core.ml.di
 
 import com.ljp.vitalcam.core.ml.MLRuntime
 import com.ljp.vitalcam.core.ml.MediaPipeMLRuntime
+import com.ljp.vitalcam.core.ml.MediaPipePoseRuntime
+import com.ljp.vitalcam.core.ml.PoseRuntime
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -14,4 +16,7 @@ abstract class MLModule {
 
     @Binds
     abstract fun bindMLRuntime(impl: MediaPipeMLRuntime): MLRuntime
+
+    @Binds
+    abstract fun bindPoseRuntime(impl: MediaPipePoseRuntime): PoseRuntime
 }

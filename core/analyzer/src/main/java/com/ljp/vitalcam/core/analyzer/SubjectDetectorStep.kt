@@ -1,5 +1,6 @@
 package com.ljp.vitalcam.core.analyzer
 
+import com.ljp.vitalcam.core.common.CameraMode
 import com.ljp.vitalcam.core.common.DetectedSubject
 import com.ljp.vitalcam.core.common.FrameData
 import com.ljp.vitalcam.core.ml.MLRuntime
@@ -25,7 +26,7 @@ class SubjectDetectorStep @Inject constructor(
     override suspend fun analyze(frame: FrameData, context: AnalysisContext): AnalysisContext {
         val result = mlRuntime.detectObjects(frame.bitmap)
 
-        val subjects = result.detections.map { detection ->
+        val allSubjects = result.detections.map { detection ->
             val box = detection.boundingBox
             DetectedSubject(
                 centerX = (box.left + box.right) / 2f,
@@ -37,6 +38,27 @@ class SubjectDetectorStep @Inject constructor(
             )
         }
 
-        return context.copy(subjects = subjects)
+        // 按拍照模式过滤检测结果
+        val filtered = filterByMode(allSubjects, context.cameraMode)
+
+        return context.copy(subjects = filtered)
+    }
+
+    /** 根据拍照模式过滤主体列表 */
+    private fun filterByMode(subjects: List<DetectedSubject>, mode: CameraMode): List<DetectedSubject> {
+        return when (mode) {
+            CameraMode.AUTO -> subjects
+            CameraMode.LANDSCAPE -> emptyList()
+            CameraMode.MACRO -> {
+                // 微距模式：保留面积最大的单个目标
+                val largest = subjects.maxByOrNull { it.width * it.height }
+                listOfNotNull(largest)
+            }
+            else -> {
+                // PORTRAIT / FOOD：按 allowedLabels 过滤
+                if (mode.allowedLabels.isEmpty()) subjects
+                else subjects.filter { it.label in mode.allowedLabels }
+            }
+        }
     }
 }

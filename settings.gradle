@@ -22,6 +22,7 @@ dependencyResolutionManagement {
 rootProject.name = "VitalCam"
 include ':app'
 include ':feature:camera'
+include ':feature:gallery'
 include ':core:pipeline'
 include ':core:ml'
 include ':core:analyzer'

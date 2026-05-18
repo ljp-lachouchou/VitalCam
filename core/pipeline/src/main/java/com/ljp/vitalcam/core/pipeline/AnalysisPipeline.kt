@@ -1,6 +1,7 @@
 package com.ljp.vitalcam.core.pipeline
 
 import com.ljp.vitalcam.core.common.AnalysisResult
+import com.ljp.vitalcam.core.common.CameraMode
 import com.ljp.vitalcam.core.common.FrameData
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -11,8 +12,8 @@ class AnalysisPipeline @Inject constructor(
     private val steps: Set<@JvmSuppressWildcards AnalysisStep>
 ) {
     /** 对一帧执行完整分析流程，返回最终结果 */
-    suspend fun execute(frame: FrameData): AnalysisResult {
-        var context = AnalysisContext()
+    suspend fun execute(frame: FrameData, cameraMode: CameraMode = CameraMode.AUTO): AnalysisResult {
+        var context = AnalysisContext(cameraMode = cameraMode)
 
         steps.filter { it.isEnabled() }
             .sortedBy { it.order }

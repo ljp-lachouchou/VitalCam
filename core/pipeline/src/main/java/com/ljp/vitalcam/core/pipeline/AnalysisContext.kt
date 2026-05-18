@@ -1,15 +1,21 @@
 package com.ljp.vitalcam.core.pipeline
 
 import com.ljp.vitalcam.core.common.AnalysisResult
+import com.ljp.vitalcam.core.common.CameraMode
 import com.ljp.vitalcam.core.common.CompositionScore
 import com.ljp.vitalcam.core.common.DetectedSubject
 import com.ljp.vitalcam.core.common.Guidance
+import com.ljp.vitalcam.core.common.PersonPose
 import com.ljp.vitalcam.core.common.SceneType
 
 /** 管道步骤间传递的共享上下文，通过 copy() 保证不可变性 */
 data class AnalysisContext(
+    /** 当前拍照模式 */
+    val cameraMode: CameraMode = CameraMode.AUTO,
     /** 检测到的主体列表 */
     val subjects: List<DetectedSubject> = emptyList(),
+    /** 检测到的人体姿势列表 */
+    val poseLandmarks: List<PersonPose> = emptyList(),
     /** 场景分类 */
     val sceneType: SceneType? = null,
     /** 各构图规则的评分 */

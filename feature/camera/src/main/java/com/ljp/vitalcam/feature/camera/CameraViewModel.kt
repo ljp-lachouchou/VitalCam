@@ -2,8 +2,12 @@ package com.ljp.vitalcam.feature.camera
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Size
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -16,7 +20,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ljp.vitalcam.core.common.AdjustDirection
 import com.ljp.vitalcam.core.common.AnalysisResult
+import com.ljp.vitalcam.core.common.CameraMode
 import com.ljp.vitalcam.core.common.FrameData
 import com.ljp.vitalcam.core.pipeline.AnalysisPipeline
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,7 +32,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
+import kotlin.math.abs
 
 /** 相机 ViewModel，管理 CameraX 生命周期、分析管道调用和拍照功能 */
 @HiltViewModel
@@ -43,14 +51,31 @@ class CameraViewModel @Inject constructor(
     private val _analysisResult = MutableStateFlow(AnalysisResult.EMPTY)
     val analysisResult: StateFlow<AnalysisResult> = _analysisResult.asStateFlow()
 
+    private val _cameraMode = MutableStateFlow(CameraMode.AUTO)
+    val cameraMode: StateFlow<CameraMode> = _cameraMode.asStateFlow()
+
+    /** 切换拍照模式，同时重置 zoom */
+    fun setCameraMode(mode: CameraMode) {
+        _cameraMode.value = mode
+        resetZoom()
+    }
+
+    private var camera: Camera? = null
     private var imageCapture: ImageCapture? = null
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
-    /** 帧计数器，用于跳帧节流 */
-    private var frameCount = 0
+    /** 分析忙碌标志：保证同时只有一个分析任务在执行 */
+    private val isAnalyzing = AtomicBoolean(false)
 
-    /** 每 N 帧分析 1 帧 */
-    private val analyzeEveryN = 3
+    /** 帧分析节流：两次分析之间的最小间隔（ms），降低 CPU/GPU 发热 */
+    private var lastAnalysisTime = 0L
+    private val analysisIntervalMs = 500L
+
+    // ── 自动 Zoom 状态 ──
+    private var currentZoomRatio = 1.0f
+    private var lastZoomTime = 0L
+    private var consecutiveZoomInCount = 0
+    private var consecutiveZoomOutCount = 0
 
     /** 绑定 CameraX 到生命周期，启动预览和分析 */
     fun bindCamera(context: Context, lifecycleOwner: LifecycleOwner) {
@@ -71,15 +96,16 @@ class CameraViewModel @Inject constructor(
                     .build()
                 imageCapture = capture
 
-                // 帧分析
+                // 帧分析：降低分辨率加速 ML 推理
                 val analysis = ImageAnalysis.Builder()
+                    .setTargetResolution(Size(640, 480))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                     .also { it.setAnalyzer(analysisExecutor, ::analyzeFrame) }
 
                 // 解绑旧用例再绑定新的
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
+                camera = cameraProvider.bindToLifecycle(
                     lifecycleOwner,
                     CameraSelector.DEFAULT_BACK_CAMERA,
                     preview,
@@ -94,29 +120,103 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    /** ImageAnalysis 回调：节流 + 异步执行管道分析 */
+    /** ImageAnalysis 回调：节流 + 忙碌检查，避免过度计算导致发热 */
     private fun analyzeFrame(imageProxy: ImageProxy) {
-        frameCount++
-        // 跳帧：每 analyzeEveryN 帧才执行一次分析
-        if (frameCount % analyzeEveryN != 0) {
+        val now = System.currentTimeMillis()
+        // 节流：距上次分析不足 500ms，直接丢弃
+        if (now - lastAnalysisTime < analysisIntervalMs) {
             imageProxy.close()
             return
         }
+        // 上一帧还在分析中，直接丢弃当前帧
+        if (!isAnalyzing.compareAndSet(false, true)) {
+            imageProxy.close()
+            return
+        }
+        lastAnalysisTime = now
 
-        val bitmap = imageProxy.toBitmap()
-        val frameData = FrameData(
-            bitmap = bitmap,
-            width = imageProxy.width,
-            height = imageProxy.height,
-            rotationDegrees = imageProxy.imageInfo.rotationDegrees,
-            timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
-        )
+        val frameData: FrameData
+        try {
+            val rawBitmap = imageProxy.toBitmap()
+            val rotation = imageProxy.imageInfo.rotationDegrees
+            // 旋转到屏幕方向，使 ML 检测坐标与预览坐标系一致
+            val bitmap = rotateBitmap(rawBitmap, rotation)
+            frameData = FrameData(
+                bitmap = bitmap,
+                width = bitmap.width,
+                height = bitmap.height,
+                rotationDegrees = 0,
+                timestampMs = imageProxy.imageInfo.timestamp / 1_000_000
+            )
+        } catch (_: Exception) {
+            // toBitmap() 失败时必须重置标志，否则后续帧全部被丢弃
+            isAnalyzing.set(false)
+            imageProxy.close()
+            return
+        }
         imageProxy.close()
 
         viewModelScope.launch(Dispatchers.Default) {
-            val result = analysisPipeline.execute(frameData)
-            _analysisResult.value = result
+            try {
+                val result = analysisPipeline.execute(frameData, _cameraMode.value)
+                _analysisResult.value = result
+                applyAutoZoom(result)
+            } finally {
+                isAnalyzing.set(false)
+            }
         }
+    }
+
+    // ── 自动 Zoom ──
+
+    /** 根据分析结果自动调整 zoom，需连续 3 帧同方向 + 1.5s 冷却 */
+    private fun applyAutoZoom(result: AnalysisResult) {
+        val cam = camera ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastZoomTime < 1500L) return
+
+        val topGuidance = result.guidances.firstOrNull() ?: return
+
+        when (topGuidance.direction) {
+            AdjustDirection.ZOOM_IN -> {
+                consecutiveZoomOutCount = 0
+                consecutiveZoomInCount++
+                if (consecutiveZoomInCount >= 3) {
+                    adjustZoom(cam, +0.2f)
+                    consecutiveZoomInCount = 0
+                }
+            }
+            AdjustDirection.ZOOM_OUT -> {
+                consecutiveZoomInCount = 0
+                consecutiveZoomOutCount++
+                if (consecutiveZoomOutCount >= 3) {
+                    adjustZoom(cam, -0.2f)
+                    consecutiveZoomOutCount = 0
+                }
+            }
+            else -> {
+                consecutiveZoomInCount = 0
+                consecutiveZoomOutCount = 0
+            }
+        }
+    }
+
+    private fun adjustZoom(cam: Camera, delta: Float) {
+        val zoomState = cam.cameraInfo.zoomState.value ?: return
+        val target = (currentZoomRatio + delta)
+            .coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
+        if (abs(target - currentZoomRatio) < 0.05f) return
+
+        cam.cameraControl.setZoomRatio(target)
+        currentZoomRatio = target
+        lastZoomTime = System.currentTimeMillis()
+    }
+
+    private fun resetZoom() {
+        camera?.cameraControl?.setZoomRatio(1.0f)
+        currentZoomRatio = 1.0f
+        consecutiveZoomInCount = 0
+        consecutiveZoomOutCount = 0
     }
 
     /** 拍照并保存到相册 */
@@ -152,6 +252,13 @@ class CameraViewModel @Inject constructor(
                 }
             }
         )
+    }
+
+    /** 按指定角度旋转 bitmap，0 度时直接返回原图 */
+    private fun rotateBitmap(bitmap: Bitmap, degrees: Int): Bitmap {
+        if (degrees == 0) return bitmap
+        val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     override fun onCleared() {

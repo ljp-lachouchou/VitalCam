@@ -54,5 +54,8 @@ dependencies {
     implementation libs.kotlinx.coroutines.core
     implementation libs.kotlinx.coroutines.android
 
+    // Coil（缩略图入口按钮）
+    implementation libs.coil.compose
+
     testImplementation libs.junit
 }
